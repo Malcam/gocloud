@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Page Title</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="../src/go.js"></script>
+
+    <script>
+
+	 document.addEventListener("DOMContentLoaded", function(event) {
+	 	
+		    const requestParser = gocloud().factory.makeParser();
+
+			gocloud().use(requestParser.listen(), 'onrequest');
+
+			const router = gocloud().factory.makeRouter();
+
+			gocloud().use(router.listen());
+
+			router.match('/test.html', (res, extras) => { 
+			    console.log("match") 
+			} );
+
+			gocloud("test.html");
+			gocloud().go("test.html");
+	  });
+    </script>
+</head>
+<body>
+    
+</body>
+</html>
