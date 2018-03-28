@@ -13,7 +13,7 @@
 	 	
 		    const requestParser = gocloud().factory.makeParser();
 
-			gocloud().use(requestParser.listen(), 'onrequest');
+			gocloud().use('onrequest', requestParser.listen());
 
 			const router = gocloud().factory.makeRouter();
 
@@ -25,6 +25,11 @@
 
 			gocloud("test.html");
 			gocloud().go("test.html");
+
+			gocloud().gopost("test.html");
+			gocloud().goget("test.html");
+
+			gocloud().set({'method':'PUT'}).go("http://store.local");
 	  });
     </script>
 </head>

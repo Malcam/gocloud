@@ -118,12 +118,13 @@ Middleware.prototype.go = function(data, next) {
     /**
      * request
      */
-    var goRequest = function(uri, data) {
+    var goRequest = function(uri, data, config = {}) {
+        const defaultConfig = {'method': 'POST', 'mode': 'cors', 'credentials': 'same-origin', 'body':null};
         this.handler  = new Middleware();
 
         this.uri = uri;
         this.data = data;
-        this.config = {'method': 'POST', 'mode': 'cors', 'credentials': 'same-origin', 'body':null};
+        this.config = { ...defaultConfig, ...config};
         this.original;
     }
 
@@ -143,6 +144,7 @@ Middleware.prototype.go = function(data, next) {
 
     var bounds = {
         init: function() {
+            this.config = {};
             this.hash = Math.random();
             this.urlAdapter = null;
             this.extras = null;
@@ -158,10 +160,24 @@ Middleware.prototype.go = function(data, next) {
         get factory() {
             return goFactory;
         },
-        go:function(uri, data = null, arg3 = null) {
-            this.extras = arg3;
+        set: function(config) {
+            if( typeof config != 'object' ) {
+                throw new Error("config is not a object");
+            }
+            this.config = {... this.config, config};
+
+            return this;
+        },
+        gopost: function(uri, data = null, extras) {
+            this.set({method:'POST'}).go(uri, data, extras);
+        },
+        goget: function(uri, data = null, extras ) {
+            this.set({method:'GET'}).go(uri, data, extras);
+        },
+        go:function(uri, data = null, extras) {
+            this.extras = extras;
             
-            var req = new goRequest(uri, data);
+            var req = new goRequest(uri, data, this.config);
 
             for( let fn of this.requestStack) {
                 req.use(fn);
@@ -174,8 +190,8 @@ Middleware.prototype.go = function(data, next) {
                 this.handler.go(res,()=>console.log("request end..."))
             }).catch( (err) => console.log(err) );
         },
-        use: function(fn, eventName = 'onresponse') {
-        	if( !fn ) {
+        use: function(eventName = 'onresponse', fn) {
+        	if( eventName == 'onresponse' || eventName == 'onrequest' && !fn ) {
                 throw new Error("fn is not a function");
             }
 
