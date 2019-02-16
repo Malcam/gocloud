@@ -10,27 +10,21 @@
     <script>
 
 	 document.addEventListener("DOMContentLoaded", function(event) {
-	 	
-		    const requestParser = gocloud().factory.makeParser();
 
-			gocloud().use('onrequest', requestParser.listen());
+		const go = goCloud().new();
 
-			const router = gocloud().factory.makeRouter();
+		const urlValidator = (pattern, url) => {
+			return new URL(url).pathname.match(`^${pattern}$`)
+		}
 
-			gocloud().use(router.listen());
+		go().setValidator(go().factory.makeValidator(urlValidator));
 
-			router.match('/test.html', (res, extras) => { 
-			    console.log("match") 
-			} );
-
-			gocloud("test.html");
-			gocloud().go("test.html");
-
-			gocloud().gopost("test.html");
-			gocloud().goget("test.html");
-
-			gocloud().set({'method':'PUT'}).go("http://store.local");
-	  });
+		go('/test.html');
+		
+		go().router("/test.html", (res, extras)=>{
+			console.log(res);
+		});
+	});
     </script>
 </head>
 <body>

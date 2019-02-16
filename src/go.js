@@ -31,11 +31,8 @@ Middleware.prototype.go = function(data, next) {
     }
 
     var goFactory = {
-        makeRouter: function () {
-            return new router();
-        },
-        makeParser: function() {
-            return new parser;
+        makeRouter: function (mediator) {
+            return new router(mediator);
         },
         makeUrlAdapter: function (fn) {
             if( !fn ) {
@@ -51,80 +48,40 @@ Middleware.prototype.go = function(data, next) {
 /**
  * Router
  */
-    var router = function () {
+    var router = function (mediator) {
         this.hash = Math.random();
         this.handler  = new Middleware();
+        this.mediator = mediator;
     }
 
     router.prototype = {
         match: function (regex, fn) {
             this.handler.use((data, next) =>  {
-                this.validate(regex, data ? data.url : null) && fn(data, data.extras)
+                this.mediator.validate(regex, data ? data.url : null) && fn(data, this.mediator.extras)
                 next();
             })
         },
-        validate:function(pattern, url) {
-            return new RegExp(pattern, 'i').test(url);
+        use: function(fn){
+            if( !fn ) {
+                throw new Error("fn is not a function");
+            }
+            console.log("append roter " + fn.name)
+            this.handler.use(fn);
         },
-        listen: function () {
-            var myfn = function(res, next) {
-                this.handler.go(res, ()=>console.log("router "+ this.hash +" handling request"))
-                next();
-            }
-
-            return myfn.bind(this);
-        }
-    }
-
-    var parser = function() {
-        this.hash = Math.random();
-    }
-
-    parser.prototype = {
-        parse: function(req, next) {
-
-            if( req.data == null) {
-                next();
-                return;
-            }
-            
-            let dataWrapper = null;
-            let data = req.data;
-        
-            if( typeof data === "object" ) {
-                //dataWrapper = JSON.stringify({"data":data}) no soported yet
-                dataWrapper = new FormData();
-                for (i in data) {
-                    dataWrapper.append(i, data[i])
-                }
-            }else if ( typeof data === "string" ) {
-                let element = document.querySelector(data);
-                dataWrapper = new FormData(element);
-            }else if( data instanceof HTMLElement){
-                dataWrapper = new FormData(data);
-            }else if( data instanceof FormData){
-                dataWrapper = data;
-            }
-    
-            req.data = dataWrapper;
-    
-            next()
-        },
-        listen: function () {
-            return this.parse.bind(this);
+        listen: function (response) {
+            this.handler.go(response, ()=>console.log("router "+ this.hash +" handling request"))
         }
     }
 
     /**
      * request
      */
-    var goRequest = function(uri, data, config = {}) {
-        const defaultConfig = {'method': 'POST', 'mode': 'cors', 'credentials': 'same-origin', 'body':null};
+    var goRequest = function(uri, data) {
         this.handler  = new Middleware();
 
         this.uri = uri;
         this.data = data;
-        this.config = { ...defaultConfig, ...config};
+        this.config = {'method': 'POST', 'mode': 'cors', 'credentials': 'same-origin', 'body':null};
         this.original;
     }
 
@@ -135,24 +92,89 @@ Middleware.prototype.go = function(data, next) {
             }
             this.handler.use(fn);
         },
-        build: function() {
-            this.config.body = this.data;
-            this.original = new Request(this.uri, this.config);
+        build: function(){
             this.handler.go(this, ()=>console.log("building request"))
         }
     }
 
+    function adaptRequestData(req, next) {
+
+        if( req.data == null) {
+            next();
+            return;
+        }
+        
+        let dataWrapper = null;
+        let data = req.data;
+        
+        if( data instanceof HTMLElement){
+            dataWrapper = new FormData(data);
+        }else if( data instanceof FormData){
+            dataWrapper = data;
+        }else if( typeof data === "object" ) {
+            //dataWrapper = JSON.stringify({"data":data}) no soported yet
+            dataWrapper = new FormData();
+            for (i in data) {
+                dataWrapper.append(i, data[i])
+            }
+        }else if ( typeof data === "string" ) {
+            let element = document.querySelector(data);
+            dataWrapper = new FormData(element);
+        }
+
+        req.data = dataWrapper;
+
+        next()
+    }
+    
+    function adaptResponseData(res, next) {
+
+        console.log("parsing response...");
+        let contentType = res.headers.get('Content-Type');
+        let text, type;
+
+        switch(contentType) {
+            case 'application/json':
+                text =  res.json();
+                type = 'json';
+                break;
+            default:
+                type = 'text';
+                text =  res.text();
+                break;
+        }
+        text.then( (data) => {
+                        res.text = data;
+                        res.json = type == "json" ? res.text : null;
+                        next();
+                    }
+        );
+    }
+
+    function validateNativeResponse(res, next) {
+        console.log("validating response...");
+        if( !res.ok ) {
+            throw new Error(res.statusText);
+        }
+
+        if( res.status < 200 || res.status > 300) {
+            throw new Error(res.statusText);
+        }
+        
+        next();
+    }
+
     var bounds = {
         init: function() {
-            this.config = {};
             this.hash = Math.random();
+            this.localRouter = new router(this);
+            this.validator = this.factory.makeValidator();
+
             this.urlAdapter = null;
             this.extras = null;
-            this.handler  = new Middleware();
-            this.requestStack = [];
 
-            this.use(this.validateResponse);
-            this.use(this.parseResponse);
+            this.localRouter.use(this.validateResponse);
+            this.localRouter.use(this.parseResponseData);
         },
         new: function () {
             return goland();
@@ -160,81 +182,43 @@ Middleware.prototype.go = function(data, next) {
         get factory() {
             return goFactory;
         },
-        set: function(config) {
-            if( typeof config != 'object' ) {
-                throw new Error("config is not a object");
-            }
-            this.config = {... this.config, config};
-
+        setValidator: function(validator) {
+            this.validator = validator;
+        },
+        setUrlAdapter:function(adapter) {
+            this.urlAdapter = adapter;
+        },
+        router: function (regex, fn) {
+            this.localRouter.match(regex, fn);
             return this;
         },
-        gopost: function(uri, data = null, extras) {
-            this.set({method:'POST'}).go(uri, data, extras);
-        },
-        goget: function(uri, data = null, extras ) {
-            this.set({method:'GET'}).go(uri, data, extras);
-        },
-        go:function(uri, data = null, extras) {
-            this.extras = extras;
+        go:function(uri, data = null, arg3 = null) {
+            this.extras = arg3;
             
-            var req = new goRequest(uri, data, this.config);
+            var req = new goRequest(uri, data);
 
-            for( let fn of this.requestStack) {
-                req.use(fn);
+            if( data ) {
+                req.use(this.parseRequestData)
+            }
+
+            if( this.urlAdapter ) {
+                req.use(this.urlAdapter.adapt);
             }
 
             req.build();
-//on response
-            return fetch(req.original).then((res) => {
-                res.extras = this.extras;
-                this.handler.go(res,()=>console.log("request end..."))
-            }).catch( (err) => console.log(err) );
-        },
-        use: function(eventName = 'onresponse', fn) {
-        	if( eventName == 'onresponse' || eventName == 'onrequest' && !fn ) {
-                throw new Error("fn is not a function");
-            }
+            req.config.body = req.data;
+            req.original = new Request(req.uri, req.config);
 
-            if( eventName == 'onrequest' ) {
-            	this.requestStack.push(fn)
-            }else if( eventName == 'onresponse' ) {
-            	this.handler.use(fn);
-            }
-        },
-        validateResponse : function(res, next){
-            console.log("validating response...");
-            if( !res.ok ) {
-                throw new Error(res.statusText);
-            }
+            const handleResponse = this.localRouter.listen.bind(this.localRouter);
 
-            if( res.status < 200 || res.status > 300) {
-                throw new Error(res.statusText);
-            }
-            
-            next();
+            return fetch(req.original).then(handleResponse).catch( (err) => console.log(err) );
         },
-        parseResponse: function(res, next) {
-            console.log("parsing response...");
-            let contentType = res.headers.get('Content-Type');
-            let text, type;
-    
-            switch(contentType) {
-                case 'application/json':
-                    text =  res.json();
-                    type = 'json';
-                    break;
-                default:
-                    type = 'text';
-                    text =  res.text();
-                    break;
-            }
-            text.then( (data) => {
-                            res.text = data;
-                            res.json = type == "json" ? res.text : null;
-                            next();
-                        }
-            );
-        }
+        validate: function (regex, data) {
+            return this.validator.validate(regex, data);
+        },
+        parseRequestData : adaptRequestData,
+        validateResponse : validateNativeResponse,
+        parseResponseData : adaptResponseData
     };
     
     var goland = function maker() {
@@ -260,6 +244,6 @@ Middleware.prototype.go = function(data, next) {
         return go;
     }
 
-    w.gocloud = goland();
+    w.goCloud = goland();
 
 })(window)
